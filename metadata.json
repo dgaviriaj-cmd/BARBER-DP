@@ -1,0 +1,6 @@
+{
+  "name": "BARBER DP",
+  "description": "Sistema web de gestión para barbería: control de citas sin solapamientos, clientes, barberos, servicios, historial de atención y reportes administrativos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
