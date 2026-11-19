@@ -1,81 +1,81 @@
 /**
- * Publica BARBER-DP en la rama gh-pages SIN usar un workflow de compilación.
- * Requiere Node.js 22+, Git y autenticación GitHub local.
- * Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.production.local.
+ * Compila y publica el sitio estático en gh-pages.
+ * Requiere Node.js compatible con Vite, Git y acceso de escritura al repositorio.
  */
-import { spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadEnv } from 'vite';
 
-const root = process.cwd();
+const root = fileURLToPath(new URL('..', import.meta.url));
 const dist = path.join(root, 'dist');
-const sourceEnv = ['.env.production.local', '.env.production', '.env.local', '.env']
-  .map((name) => path.join(root, name))
-  .filter((name) => fs.existsSync(name));
-const envContents = sourceEnv.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
-for (const name of ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY']) {
-  const fromProcess = process.env[name]?.trim();
-  const match = envContents.match(new RegExp('^\\s*' + name + '\\s*=\\s*(.+)\\s*$', 'm'));
-  if (!fromProcess && (!match || !match[1].replace(/[\\"']/g, '').trim())) {
-    console.error('Falta ' + name + '. Configúrala en .env.production.local antes de publicar.');
-    process.exit(1);
-  }
+const marker = '.barberdp-generated';
+const env = loadEnv('production', root, 'VITE_');
+const publicKey = env.VITE_SUPABASE_ANON_KEY?.trim();
+if (env.VITE_SUPABASE_URL?.trim() !== 'https://pavekklbjaplfbqvhmiy.supabase.co' ||
+    !/^sb_publishable_[A-Za-z0-9_-]+$/.test(publicKey || '')) {
+  throw new Error('Configura la URL de BARBER-DP y una clave sb_publishable_ en .env.production.local.');
 }
 
-function run(command, args, cwd = root, allowFailure = false) {
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
-  if (result.status !== 0 && !allowFailure) {
-    throw new Error('Falló: ' + command + ' ' + args.join(' '));
-  }
-  return result.status;
-}
-function capture(command, args, cwd = root) {
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', shell: process.platform === 'win32' });
-  if (result.status !== 0) throw new Error(result.stderr || 'Error al consultar Git');
-  return result.stdout.trim();
+function git(args, cwd = root) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
-const remote = capture('git', ['remote', 'get-url', 'origin']);
-const ownerRepo = /(?:github\.com[/:])([^/]+\/BARBER-DP)(?:\.git)?$/i.exec(remote);
-if (!ownerRepo || ownerRepo[1].toLowerCase() !== 'dgaviriaj-cmd/barber-dp') {
-  throw new Error('El remote origin no corresponde a dgaviriaj-cmd/BARBER-DP.');
+const remote = git(['remote', 'get-url', 'origin']);
+const pushRemote = git(['remote', 'get-url', '--push', '--all', 'origin']);
+const barberRepo = /^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)dgaviriaj-cmd\/BARBER-DP(?:\.git)?$/i;
+if (!barberRepo.test(remote) || !barberRepo.test(pushRemote)) {
+  throw new Error('El remote origin debe apuntar exclusivamente a dgaviriaj-cmd/BARBER-DP.');
 }
 
-console.log('Compilando aplicación con Vite...');
-run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build']);
+execFileSync(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'build'], {
+  cwd: root,
+  stdio: 'inherit',
+});
 if (!fs.existsSync(path.join(dist, 'index.html'))) {
-  throw new Error('No se creó dist/index.html.');
+  throw new Error('Vite no generó dist/index.html.');
 }
 fs.writeFileSync(path.join(dist, '.nojekyll'), '');
-fs.writeFileSync(path.join(dist, '.barberdp-generated'), 'Publicación generada por scripts/deploy-pages.mjs\n');
+function catalog(directory, relative = '') {
+  return fs.readdirSync(path.join(directory, relative), { withFileTypes: true })
+    .filter(({ name }) => relative || (name !== '.git' && name !== marker))
+    .flatMap((entry) => {
+      const file = relative ? relative + '/' + entry.name : entry.name;
+      if (entry.isDirectory()) return catalog(directory, file);
+      if (!entry.isFile()) throw new Error('Recurso no regular: ' + file);
+      const hash = createHash('sha256').update(fs.readFileSync(path.join(directory, file))).digest('hex');
+      return [[file, hash]];
+    });
+}
+fs.writeFileSync(path.join(dist, marker), JSON.stringify(catalog(dist)) + '\n');
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'barberdp-pages-'));
 try {
-  const exists = spawnSync('git', ['ls-remote', '--exit-code', '--heads', 'origin', 'gh-pages'], { cwd: root, encoding: 'utf8' }).status === 0;
-  if (exists) {
-    run('git', ['clone', '--quiet', '--single-branch', '--branch', 'gh-pages', remote, temp]);
-    if (!fs.existsSync(path.join(temp, '.barberdp-generated'))) {
-      throw new Error('La rama gh-pages existe y no está identificada como generada por BARBER-DP. No se sobrescribió.');
+  if (git(['ls-remote', '--heads', remote, 'refs/heads/gh-pages'])) {
+    git(['clone', '--quiet', '--single-branch', '--branch', 'gh-pages', remote, temp]);
+    const markerPath = path.join(temp, marker);
+    if (!fs.existsSync(markerPath) ||
+        fs.readFileSync(markerPath, 'utf8').trim() !== JSON.stringify(catalog(temp))) {
+      throw new Error('La rama gh-pages tiene contenido sin identificar. Revisa su historial antes de publicar.');
+    }
+    for (const entry of fs.readdirSync(temp)) {
+      if (entry !== '.git') fs.rmSync(path.join(temp, entry), { recursive: true });
     }
   } else {
-    run('git', ['clone', '--quiet', '--no-checkout', remote, temp]);
-    run('git', ['checkout', '--orphan', 'gh-pages'], temp);
-    run('git', ['rm', '-r', '-f', '--ignore-unmatch', '.'], temp);
+    git(['init', '--quiet', '--initial-branch=gh-pages'], temp);
   }
-  for (const entry of fs.readdirSync(temp)) {
-    if (entry !== '.git') fs.rmSync(path.join(temp, entry), { recursive: true, force: true });
-  }
-  fs.cpSync(dist, temp, { recursive: true, force: true });
-  run('git', ['add', '--all'], temp);
-  const changed = capture('git', ['status', '--porcelain'], temp);
-  if (changed) {
-    run('git', ['commit', '-m', 'deploy: publish BARBER-DP static site'], temp);
-    run('git', ['push', 'origin', 'HEAD:gh-pages'], temp);
+  fs.cpSync(dist, temp, { recursive: true });
+  git(['add', '--all'], temp);
+  if (git(['status', '--porcelain'], temp)) {
+    git(['commit', '-m', 'deploy: publish BARBER-DP static site'], temp);
+    git(['push', pushRemote, 'HEAD:refs/heads/gh-pages'], temp);
+    console.log('Publicado en gh-pages.');
   } else {
-    console.log('No hay cambios por publicar.');
+    console.log('La rama gh-pages ya contiene esta compilación.');
   }
-  console.log('Archivos publicados en gh-pages. Configura Pages: Deploy from a branch / gh-pages / (root).');
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }

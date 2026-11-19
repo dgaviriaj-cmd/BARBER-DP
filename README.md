@@ -62,7 +62,7 @@ Cuando no hay credenciales de Supabase configuradas, el sistema opera con almace
 
 GitHub Actions está bloqueado actualmente por una restricción de facturación de la cuenta. Este proyecto puede compilarse **en tu computador** y enviar los archivos estáticos resultantes a la rama `gh-pages`, sin ejecutar nuestro antiguo workflow de Actions.
 
-**Requisitos:** Node.js 22 o superior, Git, acceso de escritura al repositorio y una sesión GitHub autenticada desde Git. La conexión a Supabase usa exclusivamente la URL y la **clave pública publishable**; nunca coloques `service_role` o `sb_secret` en el navegador.
+**Requisitos:** Node.js 22.12+ (o 20.19+ en la serie 20), Git, acceso de escritura al repositorio y una sesión GitHub autenticada desde Git. La conexión a Supabase usa exclusivamente la URL y la **clave pública publishable**; nunca coloques `service_role` o `sb_secret` en el navegador.
 
 1. Descarga el repositorio y abre una terminal en su carpeta.
 2. Crea un archivo local `.env.production.local` (está excluido por `.gitignore`):
@@ -81,7 +81,7 @@ GitHub Actions está bloqueado actualmente por una restricción de facturación 
    npm run deploy:pages
    ```
 
-   Este comando compila con Vite, comprueba que exista `dist/index.html` y publica su contenido en `gh-pages`. No modifica la rama `main` ni las tablas de Supabase. Si `gh-pages` ya existía pero no fue generada por este comando, se detiene para evitar sobrescribirla.
+   Este comando compila con Vite, comprueba que exista `dist/index.html` y publica su contenido en `gh-pages`. No modifica la rama `main` ni las tablas de Supabase. Si `gh-pages` contiene archivos que no coinciden con el manifiesto del último despliegue, el comando se detiene para protegerlos.
 
 4. En [Settings → Pages](https://github.com/dgaviriaj-cmd/BARBER-DP/settings/pages), selecciona **Deploy from a branch**, la rama **gh-pages**, carpeta **/(root)**, y guarda.
 5. Comprueba [BARBER-DP](https://dgaviriaj-cmd.github.io/BARBER-DP/).
