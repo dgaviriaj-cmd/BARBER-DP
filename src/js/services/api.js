@@ -51,6 +51,51 @@ async function localFetch(url, options = {}) {
 }
 
 /**
+ * Inicializa los registros propios después de una sesión válida.
+ * Nunca confía en el rol enviado como metadata y nunca vincula clientes por teléfono.
+ * Esto funciona aunque Supabase exija confirmar el correo antes de iniciar sesión.
+ */
+async function ensureOwnRecords(authUser) {
+  const nombre = String(authUser.user_metadata?.nombre || '').trim();
+  const telefono = normalizePhone(String(authUser.user_metadata?.telefono || ''));
+  const { data: perfil, error: perfilReadError } = await supabase
+    .from('perfiles')
+    .select('id')
+    .eq('id', authUser.id)
+    .maybeSingle();
+  if (perfilReadError) throw new Error(perfilReadError.message);
+
+  if (!perfil && nombre.length >= 2) {
+    const { error } = await supabase.from('perfiles').insert({
+      id: authUser.id,
+      nombre,
+      rol: 'cliente',
+    });
+    if (error && error.code !== '23505') throw new Error(error.message);
+  }
+
+  const { data: cliente, error: clienteReadError } = await supabase
+    .from('clientes')
+    .select('id')
+    .eq('perfil_id', authUser.id)
+    .maybeSingle();
+  if (clienteReadError) throw new Error(clienteReadError.message);
+
+  if (!cliente && nombre.length >= 2 && telefono.length >= 7) {
+    const { error } = await supabase.from('clientes').insert({
+      perfil_id: authUser.id,
+      nombre,
+      telefono,
+      correo: authUser.email || null,
+    });
+    if (error?.code === '23505') {
+      throw new Error('Ya existe una ficha con este teléfono o correo. Solicita al administrador que revise la vinculación; por seguridad no se reutiliza automáticamente.');
+    }
+    if (error) throw new Error(error.message);
+  }
+}
+
+/**
  * Capa de acceso a datos unificada: usa Supabase PostgreSQL + Auth si está configurado,
  * o la API local persistente (/api/*) cuando aún no se configuran credenciales de Supabase.
  */
@@ -83,22 +128,12 @@ export const api = {
       const { data, error } = await supabase.auth.signUp({
         email: val.normalized.correo,
         password,
-        options: { data: { nombre: val.normalized.nombre } },
+        options: { data: { nombre: val.normalized.nombre, telefono: val.normalized.telefono } },
       });
       if (error) throw new Error(error.message);
-      if (data.user) {
-        await supabase.from('perfiles').upsert({
-          id: data.user.id,
-          nombre: val.normalized.nombre,
-          rol: 'cliente',
-        });
-        await supabase.from('clientes').insert({
-          perfil_id: data.user.id,
-          nombre: val.normalized.nombre,
-          telefono: val.normalized.telefono,
-          correo: val.normalized.correo,
-        });
-      }
+      // Sin sesión todavía no existe identidad autenticada para escribir en RLS.
+      // Tras confirmar el correo e iniciar sesión, bootstrap crea la ficha propia.
+      if (!data.session) return { requiresEmailConfirmation: true };
       return this.bootstrap();
     }
     const res = await localFetch('/api/auth/register', {
@@ -126,6 +161,7 @@ export const api = {
 
       let user = null;
       if (authUser) {
+        await ensureOwnRecords(authUser);
         const { data: perfil } = await supabase
           .from('perfiles')
           .select('*')
@@ -337,6 +373,15 @@ export const api = {
 
   async createAppointment(payload) {
     if (isSupabaseConfigured && supabase) {
+      const { data: { user }, error: sessionError } = await supabase.auth.getUser();
+      if (sessionError || !user) {
+        throw new Error('Para reservar necesitas crear una cuenta e iniciar sesión.');
+      }
+      const { data: perfil } = await supabase.from('perfiles').select('rol').eq('id', user.id).maybeSingle();
+      const esAdmin = perfil?.rol === 'admin';
+      if (!esAdmin && (!payload.cliente_id || payload.cliente_nuevo)) {
+        throw new Error('La reserva debe quedar vinculada a tu ficha de cliente. Cierra sesión y vuelve a entrar si no aparece tu ficha.');
+      }
       let clienteId = payload.cliente_id;
       if (!clienteId && payload.cliente_nuevo) {
         const val = validateClientPayload(payload.cliente_nuevo);
