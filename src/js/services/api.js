@@ -101,7 +101,8 @@ async function ensureOwnRecords(authUser) {
  */
 export const api = {
   getBackendMode() {
-    return isSupabaseConfigured ? 'supabase' : 'local';
+    if (isSupabaseConfigured) return 'supabase';
+    return import.meta.env.PROD ? 'unconfigured' : 'local';
   },
 
   async login(correo, password) {
@@ -154,6 +155,9 @@ export const api = {
   },
 
   async bootstrap() {
+    if (import.meta.env.PROD && !isSupabaseConfigured) {
+      throw new Error('Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Cloudflare Builds.');
+    }
     if (isSupabaseConfigured && supabase) {
       const {
         data: { user: authUser },
