@@ -6,7 +6,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/BARBER-DP/',
+    // GitHub Pages sirve desde /BARBER-DP/; Cloudflare Pages desde la raíz.
+    base: process.env.CF_PAGES === '1' ? '/' : '/BARBER-DP/',
     plugins: [
       react(),
       tailwindcss(),
