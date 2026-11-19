@@ -56,7 +56,7 @@ export function renderBookingView(
 
   // GitHub Pages usa Supabase y no puede almacenar reservas sin usuario.
   // No habilitar inserciones anónimas: permitirían crear fichas con identidades ajenas.
-  if (state.mode === 'supabase' && !state.user) {
+  if (api.getBackendMode() === 'supabase' && !state.user) {
     wrapper.innerHTML = `
       <div class="container">
         <div class="surface-card">
@@ -67,7 +67,7 @@ export function renderBookingView(
       </div>`;
     return wrapper;
   }
-  if (state.mode === 'supabase' && state.user.rol !== 'admin' && !state.user.clienteId) {
+  if (api.getBackendMode() === 'supabase' && state.user.rol !== 'admin' && !state.user.clienteId) {
     wrapper.innerHTML = `
       <div class="container">
         <div class="surface-card">
