@@ -1,6 +1,5 @@
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
 import {
-  buildLocalDateTime,
   computeReports,
   generateAvailableSlots,
   getDayOfWeekFromDateStr,
@@ -8,7 +7,19 @@ import {
   validateClientPayload,
 } from '../core/scheduling.js';
 
+import { getShopDateKey } from '../utils/formatters.js';
+
 const TOKEN_STORAGE_KEY = 'barberdp_session_token';
+
+// Supabase stores instants. The shop's calendar uses Colombia time (UTC−05:00).
+function buildBookingDateTime(date, time) {
+  return new Date(date + 'T' + time + ':00-05:00');
+}
+
+function checkResult({ data, error }) {
+  if (error) throw new Error(error.message);
+  return data;
+}
 
 function getStoredToken() {
   try {
@@ -83,22 +94,13 @@ export const api = {
       const { data, error } = await supabase.auth.signUp({
         email: val.normalized.correo,
         password,
-        options: { data: { nombre: val.normalized.nombre } },
+        options: {
+          data: { nombre: val.normalized.nombre, telefono: val.normalized.telefono },
+          emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href,
+        },
       });
       if (error) throw new Error(error.message);
-      if (data.user) {
-        await supabase.from('perfiles').upsert({
-          id: data.user.id,
-          nombre: val.normalized.nombre,
-          rol: 'cliente',
-        });
-        await supabase.from('clientes').insert({
-          perfil_id: data.user.id,
-          nombre: val.normalized.nombre,
-          telefono: val.normalized.telefono,
-          correo: val.normalized.correo,
-        });
-      }
+      if (!data.session) return null;
       return this.bootstrap();
     }
     const res = await localFetch('/api/auth/register', {
@@ -126,21 +128,29 @@ export const api = {
 
       let user = null;
       if (authUser) {
-        const { data: perfil } = await supabase
+        let perfil = checkResult(await supabase
           .from('perfiles')
-          .select('*')
+          .select('nombre, rol, activo')
           .eq('id', authUser.id)
-          .maybeSingle();
-        const { data: cli } = await supabase
+          .maybeSingle());
+        let cli = checkResult(await supabase
           .from('clientes')
           .select('id')
           .eq('perfil_id', authUser.id)
-          .maybeSingle();
+          .maybeSingle());
+        if ((!perfil || (perfil.rol === 'cliente' && perfil.activo && !cli))
+            && authUser.user_metadata?.telefono) {
+          checkResult(await supabase.rpc('activar_cliente'));
+          perfil = checkResult(await supabase.from('perfiles')
+            .select('nombre, rol, activo').eq('id', authUser.id).single());
+          cli = checkResult(await supabase.from('clientes')
+            .select('id').eq('perfil_id', authUser.id).maybeSingle());
+        }
         user = {
           id: authUser.id,
           nombre: perfil?.nombre || authUser.email,
           correo: authUser.email,
-          rol: perfil?.rol || 'cliente',
+          rol: perfil?.activo ? perfil.rol : 'cliente',
           clienteId: cli?.id || null,
         };
       }
@@ -159,17 +169,17 @@ export const api = {
           supabase.from('clientes').select('*').order('nombre'),
           supabase.from('citas').select('*').order('fecha_hora_inicio', { ascending: false }),
         ]);
-        clientes = cliRes.data || [];
-        citas = citRes.data || [];
+        clientes = checkResult(cliRes) || [];
+        citas = checkResult(citRes) || [];
       }
 
       return {
         mode: 'supabase',
         user,
-        servicios: svcRes.data || [],
-        barberos: barbRes.data || [],
-        barbero_servicios: bsRes.data || [],
-        horarios_barbero: horRes.data || [],
+        servicios: checkResult(svcRes) || [],
+        barberos: checkResult(barbRes) || [],
+        barbero_servicios: checkResult(bsRes) || [],
+        horarios_barbero: checkResult(horRes) || [],
         clientes,
         citas,
       };
@@ -182,20 +192,15 @@ export const api = {
     if (isSupabaseConfigured && supabase) {
       const dayOfWeek = getDayOfWeekFromDateStr(fecha);
       if (dayOfWeek === -1) throw new Error('Fecha inválida.');
-      const [{ data: svc }, { data: schedule }, { data: citas }] = await Promise.all([
+      const [serviceResult, scheduleResult, busyResult] = await Promise.all([
         supabase.from('servicios').select('duracion_min').eq('id', servicio_id).single(),
-        supabase
-          .from('horarios_barbero')
-          .select('*')
-          .eq('barbero_id', barbero_id)
-          .eq('dia_semana', dayOfWeek)
-          .maybeSingle(),
-        supabase
-          .from('citas')
-          .select('id, fecha_hora_inicio, fecha_hora_fin, estado')
-          .eq('barbero_id', barbero_id)
-          .in('estado', ['pendiente', 'confirmada']),
+        supabase.from('horarios_barbero').select('*')
+          .eq('barbero_id', barbero_id).eq('dia_semana', dayOfWeek).maybeSingle(),
+        supabase.rpc('franjas_ocupadas', { barbero: barbero_id, dia: fecha, ignorar: ignorar_cita_id }),
       ]);
+      const svc = checkResult(serviceResult);
+      const schedule = checkResult(scheduleResult);
+      const occupied = checkResult(busyResult);
       if (!schedule || !schedule.activo) {
         return { slots: [], message: 'El barbero no atiende ese día de la semana.' };
       }
@@ -203,10 +208,10 @@ export const api = {
         dateStr: fecha,
         serviceDurationMin: svc.duracion_min,
         schedule,
-        existingAppointments: citas || [],
+        existingAppointments: occupied.map((range) => ({ ...range, estado: 'pendiente' })),
+        buildDateTime: buildBookingDateTime,
         stepMin: 15,
         now: new Date(),
-        ignoreAppointmentId: ignorar_cita_id,
       });
       return { slots, schedule };
     }
@@ -365,7 +370,7 @@ export const api = {
         .select('duracion_min, precio')
         .eq('id', payload.servicio_id)
         .single();
-      const startDt = buildLocalDateTime(payload.fecha, payload.hora);
+      const startDt = buildBookingDateTime(payload.fecha, payload.hora);
       const endDt = new Date(startDt.getTime() + svc.duracion_min * 60_000);
       const { data, error } = await supabase
         .from('citas')
@@ -404,7 +409,7 @@ export const api = {
           .select('duracion_snapshot')
           .eq('id', id)
           .single();
-        const startDt = buildLocalDateTime(payload.fecha, payload.hora);
+        const startDt = buildBookingDateTime(payload.fecha, payload.hora);
         const endDt = new Date(startDt.getTime() + current.duracion_snapshot * 60_000);
         updates.fecha_hora_inicio = startDt.toISOString();
         updates.fecha_hora_fin = endDt.toISOString();
@@ -431,7 +436,7 @@ export const api = {
     if (isSupabaseConfigured && supabase) {
       const { data: citas, error } = await supabase
         .from('citas')
-        .select('*, clientes(nombre, telefono), barberos(nombre), servicios(nombre)')
+        .select('*, clientes(nombre, telefono, correo), barberos(nombre), servicios(nombre)')
         .order('fecha_hora_inicio', { ascending: false });
       if (error) throw new Error(error.message);
       const q = query.trim().toLowerCase();
@@ -439,7 +444,8 @@ export const api = {
         .filter(
           (a) =>
             a.clientes?.nombre?.toLowerCase().includes(q) ||
-            a.clientes?.telefono?.includes(normalizePhone(q))
+            a.clientes?.correo?.toLowerCase().includes(q) ||
+            (normalizePhone(q) && a.clientes?.telefono?.includes(normalizePhone(q)))
         )
         .map((a) => ({
           ...a,
@@ -456,17 +462,18 @@ export const api = {
 
   async getReports({ desde, hasta }) {
     if (isSupabaseConfigured && supabase) {
-      const [{ data: appointments }, { data: services }, { data: barbers }] = await Promise.all([
+      const [appointments, services, barbers] = await Promise.all([
         supabase.from('citas').select('*'),
         supabase.from('servicios').select('*'),
         supabase.from('barberos').select('*'),
       ]);
       return computeReports({
-        appointments: appointments || [],
-        services: services || [],
-        barbers: barbers || [],
+        appointments: checkResult(appointments) || [],
+        services: checkResult(services) || [],
+        barbers: checkResult(barbers) || [],
         fromDate: desde || null,
         toDate: hasta || null,
+        dateKeyFor: getShopDateKey,
       });
     }
     const params = new URLSearchParams();

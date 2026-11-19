@@ -89,3 +89,9 @@ GitHub Actions está bloqueado actualmente por una restricción de facturación 
 **Limitación importante:** aunque no hay un workflow de compilación personalizado, GitHub puede seguir utilizando su infraestructura interna para publicar Pages. Si la cuenta tiene un bloqueo de facturación general para Actions, la publicación desde una rama también podría quedar bloqueada. El comando no elimina ni esquiva las restricciones de GitHub. En ese caso, se necesita resolver el bloqueo con GitHub o elegir otro hosting estático gratuito.
 
 **Nota funcional:** GitHub Pages no ejecuta `server.ts` ni la API local `/api/*`. En producción deben existir las tablas, políticas y usuarios de Supabase, y se deben probar autenticación, disponibilidad y creación de citas antes de dar el sistema por operativo.
+
+### Actualización de Supabase para reservas en producción
+
+`supabase/04_production_hardening.sql` se aplica una sola vez tras revisar el esquema remoto de BARBER-DP. Incluye una transacción y conserva los datos existentes. Para una instalación nueva, ejecútalo después de los scripts 01 y 02. El frontend de esta rama requiere dicha actualización antes de publicar.
+
+En Supabase Auth configura como **Site URL** la URL pública del sitio y agrégala a **Redirect URLs** para confirmar el correo. El perfil de cliente se activa con la primera sesión confirmada. Para el primer administrador, el propietario debe crear una cuenta autorizada en Supabase Auth y asignarle en `public.perfiles` el rol `admin` mediante una sesión administrativa de base de datos.

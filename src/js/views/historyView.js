@@ -4,6 +4,7 @@ import {
   formatCurrency,
   formatDateOnly,
   formatTimeOnly,
+  getShopDateKey,
   getStatusLabel,
   getTodayDateInputValue,
 } from '../utils/formatters.js';
@@ -12,6 +13,7 @@ import {
  * Módulo 6: Historial de atención por cliente con reprogramación y cancelación.
  */
 export function renderHistoryView(state, { openModal, closeModal, onRefresh, notify }) {
+  const useShopTime = state.mode === 'supabase';
   const localState = {
     query: '',
     loading: false,
@@ -60,7 +62,9 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
   }
 
   function openRescheduleDialog(appt) {
-    const currentDate = appt.fecha_hora_inicio.slice(0, 10);
+    const currentDate = useShopTime
+      ? getShopDateKey(appt.fecha_hora_inicio)
+      : appt.fecha_hora_inicio.slice(0, 10);
     let selectedHora = '';
     let slots = [];
     let modalError = '';
@@ -172,7 +176,7 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
       bodyEl.innerHTML = `
         <form id="cancel-appt-form" novalidate>
           <p class="form-help" style="margin-bottom:1rem;">
-            Vas a cancelar la cita de <strong>${escapeHtml(appt.servicio_nombre)}</strong> del ${escapeHtml(formatDateOnly(appt.fecha_hora_inicio))}.
+            Vas a cancelar la cita de <strong>${escapeHtml(appt.servicio_nombre)}</strong> del ${escapeHtml(formatDateOnly(appt.fecha_hora_inicio, useShopTime))}.
           </p>
           ${errMsg ? `<div class="alert alert-error">${escapeHtml(errMsg)}</div>` : ''}
           <div class="form-field" style="margin-bottom:1rem;">
@@ -263,8 +267,8 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
                       const canEdit = appt.estado === 'pendiente' || appt.estado === 'confirmada';
                       return `
                         <tr>
-                          <td class="tabular">${escapeHtml(formatDateOnly(appt.fecha_hora_inicio))}</td>
-                          <td class="tabular">${escapeHtml(formatTimeOnly(appt.fecha_hora_inicio))}</td>
+                          <td class="tabular">${escapeHtml(formatDateOnly(appt.fecha_hora_inicio, useShopTime))}</td>
+                          <td class="tabular">${escapeHtml(formatTimeOnly(appt.fecha_hora_inicio, useShopTime))}</td>
                           <td>
                             <strong>${escapeHtml(appt.cliente_nombre)}</strong>
                             ${appt.cliente_telefono ? `<div class="form-help tabular">${escapeHtml(appt.cliente_telefono)}</div>` : ''}

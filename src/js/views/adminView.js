@@ -5,6 +5,7 @@ import {
   formatCurrency,
   formatDateOnly,
   formatTimeOnly,
+  getShopDateKey,
   getDayName,
   getStatusLabel,
   getTodayDateInputValue,
@@ -17,6 +18,7 @@ export function renderAdminView(
   state,
   { activeTab = 'citas', onTabChange, openModal, closeModal, onRefresh, notify, onNavigate }
 ) {
+  const useShopTime = state.mode === 'supabase';
   const localState = {
     activeTab,
     filterStatus: 'todas',
@@ -156,7 +158,11 @@ export function renderAdminView(
       const correo = wrapper.querySelector('#reg-email')?.value?.trim() || '';
       const password = wrapper.querySelector('#reg-password')?.value || '';
       try {
-        await api.register({ nombre, telefono, correo, password });
+        const result = await api.register({ nombre, telefono, correo, password });
+        if (!result) {
+          notify('Revisa tu correo para confirmar la cuenta. Luego inicia sesión.', 'success');
+          return;
+        }
         notify('Cuenta creada. Ya puedes consultar tu historial o reservar.', 'success');
         await onRefresh();
         onNavigate('historial');
@@ -434,7 +440,9 @@ export function renderAdminView(
 
   function openRescheduleAdminModal(appt) {
     const bodyEl = document.createElement('div');
-    const currentDate = appt.fecha_hora_inicio.slice(0, 10);
+    const currentDate = useShopTime
+      ? getShopDateKey(appt.fecha_hora_inicio)
+      : appt.fecha_hora_inicio.slice(0, 10);
     let selectedHora = '';
     let slots = [];
     let errMsg = '';
@@ -588,8 +596,8 @@ export function renderAdminView(
                         const svc = svcMap.get(c.servicio_id);
                         return `
                           <tr>
-                            <td class="tabular">${escapeHtml(formatDateOnly(c.fecha_hora_inicio))}</td>
-                            <td class="tabular">${escapeHtml(formatTimeOnly(c.fecha_hora_inicio))}</td>
+                            <td class="tabular">${escapeHtml(formatDateOnly(c.fecha_hora_inicio, useShopTime))}</td>
+                            <td class="tabular">${escapeHtml(formatTimeOnly(c.fecha_hora_inicio, useShopTime))}</td>
                             <td>
                               <strong>${escapeHtml(cli?.nombre || 'Cliente')}</strong>
                               <div class="form-help tabular">${escapeHtml(cli?.telefono || '')}</div>

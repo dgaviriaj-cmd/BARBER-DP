@@ -132,6 +132,7 @@ export function toLocalTimeKey(value) {
  * @param {number} [params.stepMin=15]
  * @param {Date|null} [params.now=null]
  * @param {string|null} [params.ignoreAppointmentId=null]
+ * @param {(date: string, time: string) => Date} [params.buildDateTime]
  * @returns {Array<{ hora: string, hora_fin: string, disponible: boolean, motivo: string|null }>}
  */
 export function generateAvailableSlots({
@@ -142,6 +143,7 @@ export function generateAvailableSlots({
   stepMin = 15,
   now = null,
   ignoreAppointmentId = null,
+  buildDateTime = buildLocalDateTime,
 }) {
   if (!schedule || !schedule.activo) {
     return [];
@@ -160,8 +162,7 @@ export function generateAvailableSlots({
   const dayBusyRanges = existingAppointments
     .filter((appt) => {
       if (ignoreAppointmentId && appt.id === ignoreAppointmentId) return false;
-      if (!ACTIVE_OCCUPYING_STATUSES.has(appt.estado)) return false;
-      return toLocalDateKey(appt.fecha_hora_inicio) === dateStr;
+      return ACTIVE_OCCUPYING_STATUSES.has(appt.estado);
     })
     .map((appt) => {
       const start = new Date(appt.fecha_hora_inicio).getTime();
@@ -176,7 +177,7 @@ export function generateAvailableSlots({
     const endMin = startMin + duration;
     const hora = minutesToTime(startMin);
     const horaFin = minutesToTime(endMin);
-    const slotStartMs = buildLocalDateTime(dateStr, hora).getTime();
+    const slotStartMs = buildDateTime(dateStr, hora).getTime();
     const slotEndMs = slotStartMs + duration * 60_000;
 
     let motivo = null;
@@ -319,6 +320,7 @@ export function validateSchedulePayload(payload) {
  * @param {Array} params.barbers
  * @param {string|null} [params.fromDate=null] YYYY-MM-DD
  * @param {string|null} [params.toDate=null] YYYY-MM-DD
+ * @param {(value: string|Date) => string} [params.dateKeyFor]
  */
 export function computeReports({
   appointments = [],
@@ -326,12 +328,13 @@ export function computeReports({
   barbers = [],
   fromDate = null,
   toDate = null,
+  dateKeyFor = toLocalDateKey,
 }) {
   const serviceMap = new Map(services.map((s) => [s.id, s]));
   const barberMap = new Map(barbers.map((b) => [b.id, b]));
 
   const filtered = appointments.filter((appt) => {
-    const dateKey = toLocalDateKey(appt.fecha_hora_inicio);
+    const dateKey = dateKeyFor(appt.fecha_hora_inicio);
     if (fromDate && dateKey < fromDate) return false;
     if (toDate && dateKey > toDate) return false;
     return true;

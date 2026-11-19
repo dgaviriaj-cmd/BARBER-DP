@@ -13,6 +13,7 @@ export function renderBookingView(
   state,
   { preselectedServiceId, initialSuccessMsg = '', onBookingCreated, notify }
 ) {
+  const needsAccount = state.mode === 'supabase' && state.user?.rol !== 'admin' && !state.user?.clienteId;
   const activeServices = state.servicios.filter((s) => s.activo);
   const activeBarbers = state.barberos.filter((b) => b.activo);
 
@@ -125,7 +126,13 @@ export function renderBookingView(
         : `<p class="form-help">${escapeHtml(localState.slotsMessage || 'No hay franjas disponibles para la fecha seleccionada.')}</p>`;
 
     let clientFieldsHtml = '';
-    if (loggedClient && !isAdmin) {
+    if (needsAccount) {
+      clientFieldsHtml = `
+        <p class="alert alert-info full-span">
+          Para confirmar una reserva, <a href="#admin">inicia sesión o crea una cuenta</a>.
+        </p>
+      `;
+    } else if (loggedClient && !isAdmin) {
       clientFieldsHtml = `
         <div class="alert alert-info">
           Reservando como <strong>${escapeHtml(loggedClient.nombre)}</strong> (${escapeHtml(loggedClient.telefono)}).
@@ -278,7 +285,7 @@ export function renderBookingView(
             </div>
 
             <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 0.75rem;">
-              <button type="submit" class="btn btn-primary" id="booking-submit-btn" ${!localState.hora ? 'disabled' : ''}>
+              <button type="submit" class="btn btn-primary" id="booking-submit-btn" ${!localState.hora || needsAccount ? 'disabled' : ''}>
                 Confirmar reserva
               </button>
             </div>
@@ -378,6 +385,7 @@ export function renderBookingView(
       localState.errorMsg = '';
       localState.successMsg = '';
 
+      if (needsAccount) return;
       if (!localState.hora) {
         localState.errorMsg = 'Selecciona un bloque horario disponible.';
         render();

@@ -50,20 +50,28 @@ export function formatDateTime(isoString) {
   }).format(date);
 }
 
-export function formatDateOnly(isoString) {
+const shopDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota' });
+
+export function getShopDateKey(value) {
+  return shopDate.format(new Date(value));
+}
+
+export function formatDateOnly(isoString, useShopTime = false) {
   if (!isoString) return '—';
   const date = new Date(isoString);
   return new Intl.DateTimeFormat('es-CO', {
+    timeZone: useShopTime ? 'America/Bogota' : undefined,
     year: 'numeric',
     month: 'short',
     day: '2-digit',
   }).format(date);
 }
 
-export function formatTimeOnly(isoString) {
+export function formatTimeOnly(isoString, useShopTime = false) {
   if (!isoString) return '—';
   const date = new Date(isoString);
   return new Intl.DateTimeFormat('es-CO', {
+    timeZone: useShopTime ? 'America/Bogota' : undefined,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
