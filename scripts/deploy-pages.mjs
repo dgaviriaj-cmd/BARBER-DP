@@ -34,6 +34,7 @@ if (!barberRepo.test(remote) || !barberRepo.test(pushRemote)) {
 execFileSync(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'build'], {
   cwd: root,
   stdio: 'inherit',
+  env: { ...process.env, GITHUB_PAGES: '1' },
 });
 if (!fs.existsSync(path.join(dist, 'index.html'))) {
   throw new Error('Vite no generó dist/index.html.');
