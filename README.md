@@ -89,3 +89,24 @@ GitHub Actions está bloqueado actualmente por una restricción de facturación 
 **Limitación importante:** aunque no hay un workflow de compilación personalizado, GitHub puede seguir utilizando su infraestructura interna para publicar Pages. Si la cuenta tiene un bloqueo de facturación general para Actions, la publicación desde una rama también podría quedar bloqueada. El comando no elimina ni esquiva las restricciones de GitHub. En ese caso, se necesita resolver el bloqueo con GitHub o elegir otro hosting estático gratuito.
 
 **Nota funcional:** GitHub Pages no ejecuta `server.ts` ni la API local `/api/*`. En producción deben existir las tablas, políticas y usuarios de Supabase, y se deben probar autenticación, disponibilidad y creación de citas antes de dar el sistema por operativo.
+
+
+## Despliegue automático sin pasos manuales por cada cambio
+
+**Opción recomendada para automatizar:** Cloudflare Pages conectado a GitHub, manteniendo el proyecto Supabase existente. Una vez vinculado el repositorio, cada `git push` a `main` puede compilar y publicar automáticamente, sin GitHub Actions ni ejecutar `npm run deploy:pages`.
+
+En Cloudflare Dashboard → Workers & Pages → Create application → Pages → Import an existing Git repository:
+
+- Repositorio: `dgaviriaj-cmd/BARBER-DP`.
+- Rama de producción: `main`.
+- Comando de compilación: `npm run build`.
+- Directorio de salida: `dist`.
+- Versión de Node: 22 o superior.
+- Variables de compilación: `VITE_SUPABASE_URL=https://pavekklbjaplfbqvhmiy.supabase.co` y `VITE_SUPABASE_ANON_KEY` con la clave **publicable** de Supabase. Nunca ingresar claves secretas.
+- `vite.config.ts` detecta `CF_PAGES=1` y configura `base: '/'` para el dominio `*.pages.dev`; conserva `/BARBER-DP/` para el enlace GitHub Pages.
+
+**Estado de integración (2026-11-19):** se intentó crear el proyecto Cloudflare desde la conexión autorizada y Cloudflare respondió con error `8000011`: problema interno en la instalación de Git de Cloudflare Pages. Para resolverlo, revisar/reinstalar la aplicación Cloudflare Pages desde [GitHub → Applications → Installed GitHub Apps](https://github.com/settings/installations), otorgarle acceso al repositorio BARBER-DP y vincularlo desde Cloudflare. Hasta que la integración funcione no hay un despliegue automático activo.
+
+**Importante:** Cloudflare crea un dominio diferente, `*.pages.dev`. El enlace `https://dgaviriaj-cmd.github.io/BARBER-DP/` no se actualizará por Cloudflare. Para conservar actualizada esa URL con GitHub Pages se requiere que GitHub permita su proceso de publicación (el bloqueo de facturación de Actions no puede corregirse con código).
+
+El despliegue manual con `npm run deploy:pages` sigue disponible como alternativa.
