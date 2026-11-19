@@ -54,6 +54,31 @@ export function renderBookingView(
   const wrapper = document.createElement('section');
   wrapper.className = 'section';
 
+  // GitHub Pages usa Supabase y no puede almacenar reservas sin usuario.
+  // No habilitar inserciones anónimas: permitirían crear fichas con identidades ajenas.
+  if (state.mode === 'supabase' && !state.user) {
+    wrapper.innerHTML = `
+      <div class="container">
+        <div class="surface-card">
+          <h1 class="section-title">Reserva tu cita</h1>
+          <p>Para reservar, crea tu cuenta de cliente o inicia sesión. Tus citas quedarán asociadas a tu perfil.</p>
+          <a class="btn btn-primary" href="#admin">Registrarme o iniciar sesión</a>
+        </div>
+      </div>`;
+    return wrapper;
+  }
+  if (state.mode === 'supabase' && state.user.rol !== 'admin' && !state.user.clienteId) {
+    wrapper.innerHTML = `
+      <div class="container">
+        <div class="surface-card">
+          <h1 class="section-title">No se encontró tu ficha de cliente</h1>
+          <p>Tu cuenta está activa, pero todavía no tiene una ficha vinculada. Cierra sesión e inicia de nuevo; si continúa el problema, comunícate con el administrador.</p>
+          <a class="btn btn-primary" href="#admin">Ir a mi cuenta</a>
+        </div>
+      </div>`;
+    return wrapper;
+  }
+
   async function loadAvailability() {
     if (!localState.barberoId || !localState.servicioId || !localState.fecha) {
       localState.slots = [];
