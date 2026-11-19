@@ -1,4 +1,4 @@
-import '../styles/main.css';
+import './styles/main.css';
 import { api } from './js/services/api.js';
 import { renderHomeView } from './js/views/homeView.js';
 import { renderBookingView } from './js/views/bookingView.js';
