@@ -156,10 +156,16 @@ export function renderAdminView(
       const correo = wrapper.querySelector('#reg-email')?.value?.trim() || '';
       const password = wrapper.querySelector('#reg-password')?.value || '';
       try {
-        await api.register({ nombre, telefono, correo, password });
-        notify('Cuenta creada. Ya puedes consultar tu historial o reservar.', 'success');
+        const registration = await api.register({ nombre, telefono, correo, password });
+        if (registration?.requiresEmailConfirmation) {
+          notify('Revisa tu correo para confirmar la cuenta. Luego inicia sesión para reservar.', 'success');
+          localState.registerError = '';
+          renderAuthScreen();
+          return;
+        }
+        notify('Cuenta creada. Ya puedes reservar tu cita.', 'success');
         await onRefresh();
-        onNavigate('historial');
+        onNavigate('reservar');
       } catch (err) {
         localState.registerError = err.message;
         renderAuthScreen();
