@@ -110,3 +110,22 @@ En Cloudflare Dashboard → Workers & Pages → Create application → Pages →
 **Importante:** Cloudflare crea un dominio diferente, `*.pages.dev`. El enlace `https://dgaviriaj-cmd.github.io/BARBER-DP/` no se actualizará por Cloudflare. Para conservar actualizada esa URL con GitHub Pages se requiere que GitHub permita su proceso de publicación (el bloqueo de facturación de Actions no puede corregirse con código).
 
 El despliegue manual con `npm run deploy:pages` sigue disponible como alternativa.
+
+
+## Cloudflare Workers: publicación automática de archivos estáticos
+
+El dominio `barber-dp.dgaviriaj.workers.dev` corresponde a **Cloudflare Workers**, no a un proyecto Pages. El Worker anterior respondía el HTML pero no tenía configurados los archivos estáticos, por eso se veía sin CSS/JavaScript.
+
+Este repositorio incluye ahora `wrangler.jsonc` con Assets estáticos desde `dist/` y fallback SPA. Para la integración de Cloudflare Workers Builds configura una sola vez:
+
+- **Build command:** `npm run build`
+- **Deploy command:** `npx wrangler deploy`
+- **Production branch:** `main`
+- **Node.js:** `22.12.0` (también fijado en `.nvmrc`)
+- **Build variables:** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (solo clave pública `sb_publishable_...`).
+
+El proyecto usa `base: '/'` en Cloudflare Workers. Para la publicación manual de GitHub Pages, el script `npm run deploy:pages` define `GITHUB_PAGES=1` y compila con `base: '/BARBER-DP/'`.
+
+Después de guardar esta configuración, cada push a `main` debe compilar y ejecutar `wrangler deploy`; los archivos HTML, CSS y JS se sirven desde Cloudflare Workers Static Assets. No configures el Worker para responder únicamente con un HTML en línea ni omitas `dist/`.
+
+**Comprobación de la interfaz de reservas:** en producción con Supabase, un visitante sin sesión debe ver un aviso para registrarse/iniciar sesión; no debe ver el formulario público de nombre/teléfono ni intentar insertar una fila anónima en `clientes`. Los clientes autenticados reservan con su propia ficha y los administradores pueden crear fichas desde el panel autorizado.
