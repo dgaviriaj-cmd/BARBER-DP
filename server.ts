@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { matchesClientHistorySearch } from './src/js/core/history.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
@@ -905,32 +906,37 @@ async function startServer() {
 
   // --- HISTORIAL (Módulo 6) ---
   app.get('/api/historial', (req, res) => {
-    const q = String(req.query.q || '').trim().toLowerCase();
     const store = loadStore();
-    if (!q) {
-      return res.status(400).json({ error: 'Ingresa un teléfono, correo o nombre para consultar.' });
+    const user = getAuthenticatedUser(req, store);
+    if (!user) return res.status(401).json({ error: 'Inicia sesión para consultar historiales.' });
+    if (user.rol !== 'admin' && user.rol !== 'cliente') {
+      return res.status(403).json({ error: 'No tienes permiso para consultar historiales de clientes.' });
     }
-    const qPhone = normalizePhone(q);
-    const matchedClients = store.clientes.filter((c) => {
-      const matchPhone = qPhone.length >= 4 && normalizePhone(c.telefono).includes(qPhone);
-      const matchEmail = c.correo && c.correo.toLowerCase().includes(q);
-      const matchName = c.nombre.toLowerCase().includes(q);
-      return matchPhone || matchEmail || matchName;
-    });
 
-    const clientIds = new Set(matchedClients.map((c) => c.id));
-    const citas = store.citas
-      .filter((a) => clientIds.has(a.cliente_id))
-      .sort((a, b) => b.fecha_hora_inicio.localeCompare(a.fecha_hora_inicio))
-      .map((a) => ({
-        ...a,
-        cliente_nombre: store.clientes.find((c) => c.id === a.cliente_id)?.nombre || 'Cliente',
-        cliente_telefono: store.clientes.find((c) => c.id === a.cliente_id)?.telefono || '',
-        barbero_nombre: store.barberos.find((b) => b.id === a.barbero_id)?.nombre || 'Barbero',
-        servicio_nombre: store.servicios.find((s) => s.id === a.servicio_id)?.nombre || 'Servicio',
-      }));
+    const clienteId = String(req.query.cliente_id || '').trim();
+    const visibleClients = user.rol === 'admin'
+      ? store.clientes
+      : store.clientes.filter((c) => c.id === user.clienteId);
+    if (clienteId) {
+      const client = visibleClients.find((c) => c.id === clienteId);
+      if (!client) return res.status(403).json({ error: 'No tienes permiso para ver el historial solicitado.' });
+      const citas = store.citas
+        .filter((a) => a.cliente_id === clienteId)
+        .sort((a, b) => b.fecha_hora_inicio.localeCompare(a.fecha_hora_inicio))
+        .map((a) => ({
+          ...a,
+          cliente_nombre: client.nombre,
+          cliente_telefono: client.telefono,
+          barbero_nombre: store.barberos.find((b) => b.id === a.barbero_id)?.nombre || 'Barbero',
+          servicio_nombre: store.servicios.find((s) => s.id === a.servicio_id)?.nombre || 'Servicio',
+        }));
+      return res.json({ citas });
+    }
 
-    return res.json({ clientes: matchedClients, citas });
+    const q = String(req.query.q || '').trim().toLowerCase();
+    if (q.length < 2) return res.status(400).json({ error: 'Ingresa al menos 2 caracteres para buscar.' });
+    const matchedClients = visibleClients.filter((c) => matchesClientHistorySearch(c, q));
+    return res.json({ clientes: matchedClients, citas: [] });
   });
 
   // --- CITAS (Módulo 5) ---

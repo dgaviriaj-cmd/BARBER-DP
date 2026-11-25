@@ -1,4 +1,5 @@
 import { api } from '../services/api.js';
+import { filterClientAppointments } from '../core/history.js';
 import {
   escapeHtml,
   formatCurrency,
@@ -17,15 +18,24 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
     loading: false,
     error: '',
     results: null,
+    clients: [],
+    selectedClientId: null,
+    searched: false,
   };
 
   // Si el usuario es cliente autenticado, mostramos sus citas automáticamente al entrar
   const isLoggedClient = state.user?.rol === 'cliente' && state.user?.clienteId;
-  if (isLoggedClient && state.citas.length && localState.results === null) {
+  if (isLoggedClient) {
+    localState.selectedClientId = state.user.clienteId;
+    localState.clients = [{
+      id: state.user.clienteId,
+      nombre: state.user.nombre,
+      correo: state.user.correo,
+    }];
     const cliMap = new Map(state.clientes.map((c) => [c.id, c]));
     const barbMap = new Map(state.barberos.map((b) => [b.id, b]));
     const svcMap = new Map(state.servicios.map((s) => [s.id, s]));
-    localState.results = state.citas.map((a) => ({
+    localState.results = filterClientAppointments(state.citas, state.user.clienteId).map((a) => ({
       ...a,
       cliente_nombre: cliMap.get(a.cliente_id)?.nombre || state.user.nombre,
       cliente_telefono: cliMap.get(a.cliente_id)?.telefono || '',
@@ -37,25 +47,59 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
   const wrapper = document.createElement('section');
   wrapper.className = 'section';
 
-  async function runSearch(queryText) {
-    const q = queryText.trim();
-    if (!q) {
-      localState.error = 'Ingresa un teléfono, correo o nombre del cliente.';
-      render();
-      return;
-    }
+  // Cada selección tiene su propio identificador para evitar resultados obsoletos.
+  let requestId = 0;
+
+  async function loadClientHistory(clienteId) {
+    const currentRequest = ++requestId;
+    localState.selectedClientId = clienteId;
+    localState.results = null;
     localState.loading = true;
     localState.error = '';
     render();
     try {
-      const data = await api.searchHistory(q);
-      localState.results = data.citas || [];
+      const data = await api.getClientHistory(clienteId);
+      if (currentRequest !== requestId) return;
+      localState.results = filterClientAppointments(data.citas, clienteId);
     } catch (err) {
+      if (currentRequest !== requestId) return;
       localState.error = err.message;
       localState.results = [];
     } finally {
-      localState.loading = false;
+      if (currentRequest === requestId) {
+        localState.loading = false;
+        render();
+      }
+    }
+  }
+
+  async function runSearch(queryText) {
+    const q = String(queryText || '').trim();
+    if (q.length < 2) {
+      localState.error = 'Escribe al menos 2 caracteres para buscar un cliente.';
       render();
+      return;
+    }
+    const currentRequest = ++requestId;
+    localState.loading = true;
+    localState.error = '';
+    localState.results = null;
+    localState.clients = [];
+    localState.selectedClientId = null;
+    localState.searched = true;
+    render();
+    try {
+      const data = await api.searchHistory(q);
+      if (currentRequest !== requestId) return;
+      localState.clients = data.clientes || [];
+    } catch (err) {
+      if (currentRequest !== requestId) return;
+      localState.error = err.message;
+    } finally {
+      if (currentRequest === requestId) {
+        localState.loading = false;
+        render();
+      }
     }
   }
 
@@ -152,7 +196,7 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
           closeModal();
           notify('Cita reprogramada correctamente.', 'success');
           await onRefresh();
-          if (localState.query) await runSearch(localState.query);
+          if (localState.selectedClientId) await loadClientHistory(localState.selectedClientId);
         } catch (err) {
           modalError = err.message;
           renderBody(fechaVal);
@@ -215,7 +259,7 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
           closeModal();
           notify('Cita cancelada.', 'success');
           await onRefresh();
-          if (localState.query) await runSearch(localState.query);
+          if (localState.selectedClientId) await loadClientHistory(localState.selectedClientId);
         } catch (err) {
           errMsg = err.message;
           renderCancel();
@@ -233,13 +277,13 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
       localState.results === null
         ? `
           <div class="empty-state">
-            <p>Ingresa un número de teléfono, correo o nombre para consultar el historial de servicios de un cliente.</p>
+            <p>${localState.loading ? 'Consultando historial...' : localState.searched ? 'Selecciona un cliente para consultar únicamente sus citas.' : 'Busca un cliente por nombre, correo o teléfono y selecciónalo para consultar su historial.'}</p>
           </div>
         `
         : rows.length === 0
           ? `
             <div class="empty-state">
-              <p>No se encontraron citas registradas para esa búsqueda.</p>
+              <p>Este cliente no tiene citas registradas.</p>
             </div>
           `
           : `
@@ -303,6 +347,28 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
             </div>
           `;
 
+    const canSearchClients = state.user?.rol === 'admin';
+    const selectedClient = localState.clients.find((client) => client.id === localState.selectedClientId);
+    const candidatesHtml = !canSearchClients || !localState.searched
+      ? ''
+      : localState.loading && !localState.selectedClientId
+        ? '<p class="form-help">Buscando clientes...</p>'
+        : localState.clients.length === 0
+          ? '<div class="empty-state"><p>No se encontraron clientes con esos datos.</p></div>'
+          : `
+            <div class="surface-card" style="margin-bottom:1.5rem;">
+              <p class="form-help" style="margin-bottom:0.75rem;">Selecciona el cliente cuyo historial deseas consultar:</p>
+              <div class="inline-actions" style="flex-wrap:wrap;">
+                ${localState.clients.map((client) => `
+                  <button type="button" class="btn btn-secondary btn-sm"
+                    data-history-client="${escapeHtml(client.id)}"
+                    aria-pressed="${client.id === localState.selectedClientId}">
+                    ${escapeHtml(client.nombre)} · ${escapeHtml(client.telefono || client.correo || '')}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          `;
     wrapper.innerHTML = `
       <div class="container">
         <div class="section-header">
@@ -314,26 +380,30 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
           </div>
         </div>
 
-        <form id="history-search-form" class="surface-card" style="margin-bottom: 1.5rem;" novalidate>
-          <div class="toolbar-row" style="margin-bottom:0;">
-            <div class="form-field" style="flex:1; min-width: 240px;">
-              <label class="form-label" for="history-query">Buscar cliente (teléfono, nombre o correo)</label>
-              <input
-                id="history-query"
-                type="search"
-                class="form-control"
-                value="${escapeHtml(localState.query)}"
-                placeholder="Ej. 3105550101 o Carlos"
-              />
+        ${canSearchClients ? `
+          <form id="history-search-form" class="surface-card" style="margin-bottom:1.5rem;" novalidate>
+            <div class="toolbar-row" style="margin-bottom:0;">
+              <div class="form-field" style="flex:1; min-width: 240px;">
+                <label class="form-label" for="history-query">Buscar cliente (teléfono, nombre o correo)</label>
+                <input id="history-query" type="search" class="form-control"
+                  value="${escapeHtml(localState.query)}"
+                  placeholder="Ej. 3105550101 o Carlos" />
+              </div>
+              <button type="submit" class="btn btn-primary" ${localState.loading ? 'disabled' : ''}>
+                ${localState.loading ? 'Buscando...' : 'Buscar cliente'}
+              </button>
             </div>
-            <button type="submit" class="btn btn-primary" ${localState.loading ? 'disabled' : ''}>
-              ${localState.loading ? 'Buscando...' : 'Consultar historial'}
-            </button>
-          </div>
-        </form>
+          </form>
+          ${candidatesHtml}
+        ` : state.user?.rol === 'cliente' && !isLoggedClient
+          ? '<div class="alert alert-info">Tu cuenta todavía no tiene una ficha de cliente vinculada.</div>'
+          : !isLoggedClient
+            ? '<div class="alert alert-info">Inicia sesión como cliente o administrador para consultar el historial.</div>'
+            : '<p class="form-help">Estás consultando únicamente tus citas.</p>'}
+        ${selectedClient && canSearchClients ? `<p class="form-help">Historial de: <strong>${escapeHtml(selectedClient.nombre)}</strong></p>` : ''}
 
         ${localState.error ? `<div class="alert alert-error">${escapeHtml(localState.error)}</div>` : ''}
-        ${tableHtml}
+        ${localState.selectedClientId ? tableHtml : ''}
       </div>
     `;
 
@@ -341,6 +411,10 @@ export function renderHistoryView(state, { openModal, closeModal, onRefresh, not
       ev.preventDefault();
       localState.query = wrapper.querySelector('#history-query')?.value || '';
       runSearch(localState.query);
+    });
+
+    wrapper.querySelectorAll('[data-history-client]').forEach((btn) => {
+      btn.addEventListener('click', () => loadClientHistory(btn.getAttribute('data-history-client')));
     });
 
     wrapper.querySelectorAll('[data-reschedule]').forEach((btn) => {

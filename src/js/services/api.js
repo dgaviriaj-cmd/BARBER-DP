@@ -477,29 +477,59 @@ export const api = {
   },
 
   async searchHistory(query) {
+    const q = String(query || '').trim();
+    const phone = normalizePhone(q);
+    if (q.length < 2 && phone.length < 4) {
+      throw new Error('Escribe al menos 2 caracteres para buscar un cliente.');
+    }
     if (isSupabaseConfigured && supabase) {
-      const { data: citas, error } = await supabase
+      // Nunca descargar todas las citas para filtrar en el navegador.
+      // Escapar comodines de ILIKE evita que '%' o '_' amplíen la búsqueda.
+      const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+      const searches = [
+        supabase.from('clientes').select('id,nombre,telefono,correo').ilike('nombre', pattern).limit(25),
+        supabase.from('clientes').select('id,nombre,telefono,correo').ilike('correo', pattern).limit(25),
+      ];
+      if (phone.length >= 4) {
+        searches.push(
+          supabase.from('clientes').select('id,nombre,telefono,correo').ilike('telefono', `%${phone}%`).limit(25)
+        );
+      }
+      const results = await Promise.all(searches);
+      const clientsById = new Map();
+      for (const { data, error } of results) {
+        if (error) throw new Error(error.message);
+        for (const client of data || []) clientsById.set(client.id, client);
+      }
+      return {
+        clientes: [...clientsById.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
+        citas: [],
+      };
+    }
+    const params = new URLSearchParams({ q });
+    return localFetch(`/api/historial?${params.toString()}`);
+  },
+
+  async getClientHistory(clienteId) {
+    if (!clienteId) throw new Error('Selecciona un cliente para consultar su historial.');
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
         .from('citas')
         .select('*, clientes(nombre, telefono), barberos(nombre), servicios(nombre)')
+        .eq('cliente_id', clienteId)
         .order('fecha_hora_inicio', { ascending: false });
       if (error) throw new Error(error.message);
-      const q = query.trim().toLowerCase();
-      const filtered = (citas || [])
-        .filter(
-          (a) =>
-            a.clientes?.nombre?.toLowerCase().includes(q) ||
-            a.clientes?.telefono?.includes(normalizePhone(q))
-        )
-        .map((a) => ({
+      return {
+        citas: (data || []).map((a) => ({
           ...a,
           cliente_nombre: a.clientes?.nombre || 'Cliente',
           cliente_telefono: a.clientes?.telefono || '',
           barbero_nombre: a.barberos?.nombre || 'Barbero',
           servicio_nombre: a.servicios?.nombre || 'Servicio',
-        }));
-      return { clientes: [], citas: filtered };
+        })),
+      };
     }
-    const params = new URLSearchParams({ q: query });
+    const params = new URLSearchParams({ cliente_id: clienteId });
     return localFetch(`/api/historial?${params.toString()}`);
   },
 

@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/js/core/scheduling.test.ts",
+    "test": "tsx --test src/js/core/scheduling.test.ts src/js/core/history.test.ts",
     "deploy:pages": "node scripts/deploy-pages.mjs"
   },
   "dependencies": {
